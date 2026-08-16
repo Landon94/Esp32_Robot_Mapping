@@ -1,0 +1,293 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>ESP32 Motor Control</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #111;
+            color: white;
+            margin: 0;
+            padding: 20px;
+            user-select: none;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            gap: 12px;
+            justify-content: center;
+            margin-top: 40px;
+        }
+
+        button {
+            height: 70px;
+            font-size: 18px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+
+            /*
+             * Prevents mobile browsers from interpreting a long press
+             * as text selection, zooming, or another touch gesture.
+             */
+            touch-action: none;
+        }
+
+        button:active {
+            transform: scale(0.96);
+        }
+
+        .direction {
+            background: #e9ecef;
+            color: #111;
+        }
+
+        .stop {
+            background: #d62828;
+            color: white;
+        }
+
+        .empty {
+            visibility: hidden;
+        }
+
+        #status {
+            margin-top: 24px;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>ESP32 Motor Control</h1>
+
+    <div class="controls">
+        <div class="empty"></div>
+
+        <button
+            class="direction"
+            data-command="forward"
+        >
+            Forward
+        </button>
+
+        <div class="empty"></div>
+
+        <button
+            class="direction"
+            data-command="left"
+        >
+            Left
+        </button>
+
+        <button
+            id="stop-button"
+            class="stop"
+        >
+            Stop
+        </button>
+
+        <button
+            class="direction"
+            data-command="right"
+        >
+            Right
+        </button>
+
+        <div class="empty"></div>
+
+        <button
+            class="direction"
+            data-command="backward"
+        >
+            Backward
+        </button>
+
+        <div class="empty"></div>
+    </div>
+
+    <p id="status">Stopped</p>
+
+    <script>
+        const COMMAND_INTERVAL_MS = 150;
+
+        const statusText = document.getElementById("status");
+        const directionButtons =
+            document.querySelectorAll("[data-command]");
+        const stopButton =
+            document.getElementById("stop-button");
+
+        let commandInterval = null;
+        let activeCommand = null;
+
+        function sendCommand(command) {
+            fetch("/" + command, {
+                method: "POST",
+                cache: "no-store"
+            }).catch(error => {
+                console.error(
+                    "Failed to send command:",
+                    command,
+                    error
+                );
+            });
+        }
+
+        function startMoving(command) {
+            /*
+             * Prevent multiple intervals from running simultaneously.
+             */
+            stopCommandInterval();
+
+            activeCommand = command;
+            statusText.textContent = "Moving: " + command;
+
+            /*
+             * Send once immediately so movement begins without waiting
+             * for the first interval.
+             */
+            sendCommand(command);
+
+            /*
+             * Continue resending while the button or key is held.
+             */
+            commandInterval = setInterval(() => {
+                sendCommand(command);
+            }, COMMAND_INTERVAL_MS);
+        }
+
+        function stopCommandInterval() {
+            if (commandInterval !== null) {
+                clearInterval(commandInterval);
+                commandInterval = null;
+            }
+        }
+
+        function stopMoving() {
+            stopCommandInterval();
+
+            if (activeCommand !== null) {
+                activeCommand = null;
+                sendCommand("stop");
+            }
+
+            statusText.textContent = "Stopped";
+        }
+
+        directionButtons.forEach(button => {
+            const command = button.dataset.command;
+
+            button.addEventListener("pointerdown", event => {
+                event.preventDefault();
+
+                /*
+                 * Capture the pointer so pointerup is still received even
+                 * if the user's finger or mouse leaves the button.
+                 */
+                button.setPointerCapture(event.pointerId);
+
+                startMoving(command);
+            });
+
+            button.addEventListener("pointerup", event => {
+                event.preventDefault();
+                stopMoving();
+            });
+
+            button.addEventListener("pointercancel", stopMoving);
+
+            button.addEventListener("lostpointercapture", () => {
+                if (activeCommand === command) {
+                    stopMoving();
+                }
+            });
+        });
+
+        stopButton.addEventListener("pointerdown", event => {
+            event.preventDefault();
+            stopMoving();
+
+            /*
+             * Always send stop, even if the page currently thinks
+             * the robot is already stopped.
+             */
+            sendCommand("stop");
+        });
+
+        const keyCommands = {
+            ArrowUp: "forward",
+            ArrowDown: "backward",
+            ArrowLeft: "left",
+            ArrowRight: "right"
+        };
+
+        document.addEventListener("keydown", event => {
+            const command = keyCommands[event.key];
+
+            if (command !== undefined) {
+                event.preventDefault();
+
+                /*
+                 * Ignore the browser's native key-repeat events because
+                 * startMoving() creates its own controlled interval.
+                 */
+                if (!event.repeat && activeCommand === null) {
+                    startMoving(command);
+                }
+
+                return;
+            }
+
+            if (event.key === " ") {
+                event.preventDefault();
+                stopMoving();
+                sendCommand("stop");
+            }
+        });
+
+        document.addEventListener("keyup", event => {
+            const command = keyCommands[event.key];
+
+            if (
+                command !== undefined &&
+                activeCommand === command
+            ) {
+                event.preventDefault();
+                stopMoving();
+            }
+        });
+
+        /*
+         * Stop if the user switches tabs, minimizes the browser,
+         * or the page loses focus.
+         */
+        window.addEventListener("blur", stopMoving);
+
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                stopMoving();
+            }
+        });
+
+        /*
+         * Attempt to stop before the user leaves or refreshes the page.
+         * The ESP32 timeout remains the primary fail-safe.
+         */
+        window.addEventListener("pagehide", () => {
+            navigator.sendBeacon("/stop");
+        });
+    </script>
+</body>
+</html>
+```
