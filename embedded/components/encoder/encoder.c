@@ -3,13 +3,17 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "telemetry.h"
 
 
-#define PHOTO_SENSOR_PIN_1 16
+#define PHOTO_SENSOR_PIN_1 21
 #define PHOTO_SENSOR_PIN_2 14
 
 // Defined by number of slots on wheel encoder
-#define PULSE_PER_REV 20 
+#define PULSE_PER_REV 20
+
+
+static const float RPM_MULTIPLIER = (60.0f * 1000000.0f) / PULSE_PER_REV;
 
 static const char *TAG = "ENCODER";
 
@@ -78,14 +82,26 @@ void rpm_task(void *arg) {
         ESP_ERROR_CHECK(pcnt_unit_get_count(pcnt_unit_1, &count_1));
         ESP_ERROR_CHECK(pcnt_unit_get_count(pcnt_unit_2, &count_2));
 
-        uint64_t time_ellapsed = esp_timer_get_time() - time_us;
+        uint64_t time_elapsed = esp_timer_get_time() - time_us;
 
-        g_rpm_1 = ((float)count_1 * 60000.0f) / (PULSE_PER_REV * time_ellapsed);
-        g_rpm_2 = ((float)count_2 * 60000.0f) / (PULSE_PER_REV * time_ellapsed);
+        float common_factor = RPM_MULTIPLIER / time_elapsed;
+
+        g_rpm_1 = (float)count_1 * common_factor;
+        g_rpm_2 = (float)count_2 * common_factor;
 
         #if 1
             ESP_LOGI(TAG, "RPM 1: %.2f, RPM 2: %.2f", g_rpm_1, g_rpm_2);
         #endif
+
+        // Enqueue rpm msg into telemetry queue to be sent to pc
+        telemetry_msg_t msg = {0};
+
+        msg.header.timestamp_us = esp_timer_get_time();
+
+        msg.data.rpm.left_rpm  = g_rpm_1;
+        msg.data.rpm.right_rpm = g_rpm_2;
+
+        telemetry_enqueue_data(&msg, TELEMETRY_RPM);
 
         ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit_1));
         ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit_2));
@@ -93,7 +109,7 @@ void rpm_task(void *arg) {
         time_us = esp_timer_get_time();
 
         /* Converts MS by multipling tick rate in HZ with specified ms time divided by 1000*/
-        vTaskDelay(pdMS_TO_TICKS(250));
+        vTaskDelay(pdMS_TO_TICKS(150));
     }
 
 }
