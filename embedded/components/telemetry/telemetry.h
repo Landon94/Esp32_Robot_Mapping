@@ -32,8 +32,8 @@ typedef struct {
 } telemtry_msg_header_t;
 
 typedef struct {
-    uint16_t batch_count;
     telemtry_msg_header_t header;
+    uint16_t batch_count;
     telemetry_lidar_t lidar_batch[LIDAR_BATCH_SIZE];
 
 } telemetry_lidar_msg_t;
