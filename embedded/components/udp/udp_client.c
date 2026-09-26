@@ -30,5 +30,13 @@ int udp_send_msg(void *data, size_t data_length) {
         return -1;
     }
 
-    return sendto(sock, data, data_length, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    int bytes_sent = sendto(sock, data, data_length, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    
+    if (bytes_sent < 0) {
+        ESP_LOGE(TAG, "sendto failed: errno=%d (%s)", errno, strerror(errno));
+    } else {
+        ESP_LOGI(TAG, "Sent %d bytes to %s:%d", bytes_sent, HOST_IP_ADDR, PORT);
+    }
+
+    return bytes_sent;
 }
